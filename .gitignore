@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model weights & exports (downloaded automatically, too big for git)
+*.pt
+*.onnx
+*.engine
+*.torchscript
+
+# Outputs
+runs/
+data/videos/
+!data/samples/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+data/samples/*
+!data/samples/.gitkeep
