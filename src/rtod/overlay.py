@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import colorsys
+from collections import deque
 
 import cv2
 import numpy as np
 
+from .counting import LineCounter, ZoneCounter, anchor_point
 from .types import Detection, Timing
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
@@ -75,3 +77,74 @@ def draw_hud(
         color = (80, 255, 120) if i == 0 else (235, 235, 235)
         cv2.putText(img, t, (18, 8 + line_h * (i + 1)), FONT, scale, color, thickness, cv2.LINE_AA)
     return img
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2: tracking trails, counting line, zone
+# --------------------------------------------------------------------------- #
+
+
+class TrailBuffer:
+    """Last N anchor points per track ID -> draws motion trails."""
+
+    def __init__(self, length: int = 30, anchor: str = "bottom", forget_after: int = 60) -> None:
+        self.length = length
+        self.anchor = anchor
+        self.forget_after = forget_after
+        self._pts: dict[int, deque] = {}
+        self._seen: dict[int, int] = {}
+
+    def update(self, dets: list[Detection], frame: int) -> None:
+        for d in dets:
+            if d.track_id is None:
+                continue
+            q = self._pts.setdefault(d.track_id, deque(maxlen=self.length))
+            x, y = anchor_point(d, self.anchor)
+            q.append((int(x), int(y)))
+            self._seen[d.track_id] = frame
+        for tid in [t for t, f in self._seen.items() if frame - f > self.forget_after]:
+            self._pts.pop(tid, None)
+            self._seen.pop(tid, None)
+
+    def draw(self, img: np.ndarray, active: set[int]) -> None:
+        for tid, q in self._pts.items():
+            if tid not in active or len(q) < 2:
+                continue
+            color = color_for(tid)
+            pts = list(q)
+            for i in range(1, len(pts)):
+                thickness = 1 + int(3 * i / len(pts))  # thicker towards the present
+                cv2.line(img, pts[i - 1], pts[i], color, thickness, cv2.LINE_AA)
+
+
+def _ipt(p) -> tuple[int, int]:
+    return int(round(p[0])), int(round(p[1]))
+
+
+def draw_line_counter(img: np.ndarray, lc: LineCounter, flash: bool = False) -> None:
+    p1, p2 = _ipt(lc.p1), _ipt(lc.p2)
+    color = (0, 255, 255) if not flash else (0, 0, 255)
+    cv2.line(img, p1, p2, color, 3 if not flash else 6, cv2.LINE_AA)
+    for p in (p1, p2):
+        cv2.circle(img, p, 6, color, -1, cv2.LINE_AA)
+    # small arrow showing the 'in' direction (the positive side of p1->p2)
+    mx, my = (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2
+    dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+    norm = max((dx * dx + dy * dy) ** 0.5, 1e-6)
+    nx, ny = -dy / norm, dx / norm  # screen-space right-hand normal = positive side
+    tip = (int(mx + nx * 35), int(my + ny * 35))
+    cv2.arrowedLine(img, (int(mx), int(my)), tip, color, 2, cv2.LINE_AA, tipLength=0.4)
+    scale = max(0.5, min(img.shape[:2]) / 1100)
+    _label(img, f"{lc.name}  in {lc.count_in}  out {lc.count_out}", p1[0], max(p1[1] - 8, 20), color, scale)
+
+
+def draw_zone(img: np.ndarray, zc: ZoneCounter) -> None:
+    pts = np.array([_ipt(p) for p in zc.polygon], dtype=np.int32)
+    color = (255, 160, 60) if zc.occupancy == 0 else (60, 60, 255)
+    overlay = img.copy()
+    cv2.fillPoly(overlay, [pts], color)
+    cv2.addWeighted(overlay, 0.18, img, 0.82, 0, dst=img)
+    cv2.polylines(img, [pts], True, color, 2, cv2.LINE_AA)
+    x, y = pts[:, 0].min(), pts[:, 1].min()
+    scale = max(0.5, min(img.shape[:2]) / 1100)
+    _label(img, f"{zc.name}  now {zc.occupancy}  total {len(zc.unique_ids)}", int(x), int(y) + 30, color, scale)

@@ -23,6 +23,7 @@ class DetectorConfig:
     device: str | None = None     # None -> auto (CUDA if available, else CPU)
     classes: list[int] | None = None  # e.g. [0] = person only
     half: bool = False            # FP16 — GPU only
+    tracker: str = "bytetrack.yaml"  # Ultralytics tracker config (bytetrack.yaml | botsort.yaml)
 
 
 class YoloDetector:
@@ -55,7 +56,7 @@ class YoloDetector:
         if frame.shape[:2] not in self._warm_shapes:
             self.warmup(frame)
 
-    def _predict(self, frame: np.ndarray):
+    def _kwargs(self) -> dict:
         kwargs = dict(
             conf=self.cfg.conf,
             iou=self.cfg.iou,
@@ -66,12 +67,31 @@ class YoloDetector:
         )
         if self.cfg.half and self.device != "cpu":
             kwargs["half"] = True  # only pass when wanted: newer Ultralytics warns on every call otherwise
-        return self.model.predict(frame, **kwargs)[0]
+        return kwargs
+
+    def _predict(self, frame: np.ndarray):
+        return self.model.predict(frame, **self._kwargs())[0]
 
     def detect(self, frame: np.ndarray) -> tuple[list[Detection], Timing]:
         """Run one BGR frame (as read by OpenCV) through the model."""
-        result = self._predict(frame)
+        return self._to_detections(self._predict(frame))
 
+    def track(self, frame: np.ndarray) -> tuple[list[Detection], Timing]:
+        """Detect + associate with the tracker. Call on consecutive frames of ONE stream.
+
+        persist=True keeps the tracker state between calls (otherwise every frame
+        would start fresh and IDs would never persist). Create a new detector (or
+        call reset_tracker) when switching to a different video.
+        """
+        result = self.model.track(frame, persist=True, tracker=self.cfg.tracker, **self._kwargs())[0]
+        return self._to_detections(result)
+
+    def reset_tracker(self) -> None:
+        predictor = getattr(self.model, "predictor", None)
+        for t in getattr(predictor, "trackers", []) or []:
+            t.reset()
+
+    def _to_detections(self, result) -> tuple[list[Detection], Timing]:
         speed = result.speed or {}
         timing = Timing(
             preprocess_ms=float(speed.get("preprocess", 0.0)),
@@ -86,11 +106,14 @@ class YoloDetector:
         xyxy = boxes.xyxy.cpu().numpy()
         confs = boxes.conf.cpu().numpy()
         cls = boxes.cls.cpu().numpy().astype(int)
+        ids = getattr(boxes, "id", None)
+        ids = ids.cpu().numpy().astype(int) if ids is not None else [None] * len(xyxy)
         dets = [
             Detection(
                 x1=float(b[0]), y1=float(b[1]), x2=float(b[2]), y2=float(b[3]),
                 confidence=float(c), class_id=int(k), class_name=self.names.get(int(k), str(k)),
+                track_id=None if i is None else int(i),
             )
-            for b, c, k in zip(xyxy, confs, cls)
+            for b, c, k, i in zip(xyxy, confs, cls, ids)
         ]
         return dets, timing

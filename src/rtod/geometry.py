@@ -69,3 +69,71 @@ def nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float = 0.45) -> l
         overlaps = iou_matrix(boxes[best][None, :], boxes[order[1:]])[0]
         order = order[1:][overlaps <= iou_threshold]
     return keep
+
+
+# --------------------------------------------------------------------------- #
+# 2-D primitives for line / zone counting (Phase 2)
+# --------------------------------------------------------------------------- #
+Point = tuple[float, float]
+
+
+def cross(o: Point, a: Point, b: Point) -> float:
+    """z-component of (a - o) x (b - o).
+
+    > 0 : b is on one side of the directed line o->a
+    < 0 : the other side
+    = 0 : collinear
+    Image coordinates have y pointing DOWN, so on screen a positive value means
+    b is on the RIGHT-hand side of the arrow o->a (the mirror image of the
+    maths-class convention, where positive means left).
+    """
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+
+def side_of_line(p1: Point, p2: Point, pt: Point) -> int:
+    """Sign of `pt` relative to the infinite line through p1 -> p2: -1, 0 or +1."""
+    c = cross(p1, p2, pt)
+    return (c > 0) - (c < 0)
+
+
+def _on_segment(p: Point, q: Point, r: Point) -> bool:
+    """Assuming p, q, r are collinear: is q within the bounding box of segment p-r?"""
+    return min(p[0], r[0]) <= q[0] <= max(p[0], r[0]) and min(p[1], r[1]) <= q[1] <= max(p[1], r[1])
+
+
+def segments_intersect(a1: Point, a2: Point, b1: Point, b2: Point) -> bool:
+    """Do closed segments a1-a2 and b1-b2 share at least one point?
+
+    Classic orientation test: the segments cross iff each one's endpoints lie on
+    opposite sides of the other one (plus collinear/touching special cases).
+    """
+    d1 = side_of_line(b1, b2, a1)
+    d2 = side_of_line(b1, b2, a2)
+    d3 = side_of_line(a1, a2, b1)
+    d4 = side_of_line(a1, a2, b2)
+    if d1 * d2 < 0 and d3 * d4 < 0:
+        return True
+    if d1 == 0 and _on_segment(b1, a1, b2):
+        return True
+    if d2 == 0 and _on_segment(b1, a2, b2):
+        return True
+    if d3 == 0 and _on_segment(a1, b1, a2):
+        return True
+    if d4 == 0 and _on_segment(a1, b2, a2):
+        return True
+    return False
+
+
+def point_in_polygon(pt: Point, polygon: list[Point]) -> bool:
+    """Ray casting: shoot a ray to the right, count edge crossings. Odd = inside."""
+    x, y = pt
+    inside = False
+    n = len(polygon)
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        if (y1 > y) != (y2 > y):  # edge straddles the horizontal through pt
+            x_at_y = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if x < x_at_y:
+                inside = not inside
+    return inside
