@@ -1,0 +1,11 @@
+{
+  "python": "3.13.7",
+  "os": "Windows 11",
+  "cpu": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+  "torch": "2.11.0+cu128",
+  "cuda": "12.8",
+  "gpu": "NVIDIA GeForce RTX 4050 Laptop GPU",
+  "ultralytics": "8.4.175",
+  "onnxruntime": "1.26.0",
+  "cv2": "5.0.0"
+}

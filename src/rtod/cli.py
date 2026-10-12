@@ -5,6 +5,8 @@
     rtod track  --source data/videos/clip.mp4 --model yolo26m.pt \\
                 --line "door:0.5,0.1,0.5,0.95" --zone "desk:0.1,0.5;0.4,0.5;0.4,0.95;0.1,0.95"
     rtod track  --source 0 --classes 0 --line "0.5,0,0.5,1"  # people only, vertical line
+    rtod detect --source clip.mp4 --backend ort --model models/yolo26m_384x640.onnx
+    rtod bench  --source data/videos/clip.mp4 --models n,s,m --devices 0,cpu --map
 
 Coordinates for --line / --zone are normalised (0..1) so they work at any
 resolution; get them by clicking with `python scripts/pick_points.py --source ...`.
@@ -23,7 +25,7 @@ import cv2
 
 from .counting import LineCounter, ZoneCounter, denormalize, parse_line_spec, parse_zone_spec
 from .detector import DetectorConfig, YoloDetector
-from .device import describe_device
+from .device import describe_device, select_device
 from .export import ResultsExporter
 from .metrics import FpsMeter, LatencyStats, Stopwatch
 from .overlay import TrailBuffer, draw_detections, draw_hud, draw_line_counter, draw_zone
@@ -52,6 +54,8 @@ def _common_args(d: argparse.ArgumentParser, default_conf: float) -> None:
     d.add_argument("--cam-height", type=int, default=720)
     d.add_argument("--cam-backend", default="auto", choices=["auto", "msmf", "dshow", "any"],
                    help="webcam capture backend (auto tries msmf -> dshow -> any on Windows)")
+    d.add_argument("--backend", default="ultralytics", choices=["ultralytics", "ort"],
+                   help="ultralytics = .pt or .onnx via Ultralytics; ort = our raw ONNX Runtime path (.onnx only)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,7 +80,37 @@ def build_parser() -> argparse.ArgumentParser:
                    help="point of the box used for counting (bottom = feet / wheels)")
     t.add_argument("--trail", type=int, default=30, help="trail length in frames (0 = off)")
     t.add_argument("--no-export", action="store_true", help="skip CSV/JSON export")
+
+    b = sub.add_parser("bench", help="benchmark model sizes x backends x devices")
+    b.add_argument("--source", required=True, help="video (frames are decoded into RAM first)")
+    b.add_argument("--models", default="n,s,m", help="sizes (n,s,m,l,x) or .pt paths, comma-separated")
+    b.add_argument("--family", default="yolo26", help="prefix used when --models are sizes")
+    b.add_argument("--backends", default="torch,onnx,ort", help="subset of torch,onnx,ort")
+    b.add_argument("--devices", default=None, help="e.g. 0,cpu (default: GPU if available, plus cpu)")
+    b.add_argument("--frames", type=int, default=300, help="timed frames per repeat (GPU)")
+    b.add_argument("--cpu-frames", type=int, default=100, help="timed frames per repeat (CPU)")
+    b.add_argument("--repeats", type=int, default=3)
+    b.add_argument("--warmup", type=int, default=30)
+    b.add_argument("--map", action="store_true", help="also measure mAP50-95 on coco128 (downloads ~7 MB)")
+    b.add_argument("--out", default="results")
     return p
+
+
+def run_bench(args: argparse.Namespace) -> int:
+    from .bench import run_benchmark
+
+    models = [m if m.endswith((".pt", ".onnx")) else f"{args.family}{m}.pt" for m in args.models.split(",")]
+    if args.devices:
+        devices = args.devices.split(",")
+    else:
+        gpu = select_device(None)
+        devices = [gpu, "cpu"] if gpu != "cpu" else ["cpu"]
+    run_benchmark(
+        args.source, models, args.backends.split(","), devices, n_frames=args.frames,
+        repeats=args.repeats, warmup=args.warmup, out_dir=args.out, with_map=args.map,
+        cpu_frames=args.cpu_frames,
+    )
+    return 0
 
 
 def run(args: argparse.Namespace) -> int:
@@ -87,7 +121,19 @@ def run(args: argparse.Namespace) -> int:
         tracker=f"{getattr(args, 'tracker', 'bytetrack')}.yaml",
     )
     print(f"[rtod] loading {cfg.weights} ...")
-    det = YoloDetector(cfg)
+    if args.backend == "ort":
+        from .onnx_backend import OnnxDetector
+
+        if not args.model.endswith(".onnx"):
+            raise SystemExit("--backend ort needs an .onnx model (create one with `rtod bench` or model.export)")
+        if tracking and args.tracker != "iou":
+            raise SystemExit("--backend ort has no built-in ByteTrack: use --tracker iou, "
+                             "or --backend ultralytics with the same .onnx file for ByteTrack")
+        det = OnnxDetector(args.model, device=select_device(args.device), conf=args.conf,
+                           iou=args.iou, classes=cfg.classes)
+        print(f"[rtod] backend: raw ONNX Runtime ({det.provider}), input {det.input_hw[0]}x{det.input_hw[1]}")
+    else:
+        det = YoloDetector(cfg)
     print(f"[rtod] device: {describe_device(det.device)}")
 
     src = FrameSource(args.source, args.cam_width, args.cam_height, args.cam_backend)
@@ -266,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd in ("detect", "track"):
         return run(args)
+    if args.cmd == "bench":
+        return run_bench(args)
     return 1
 
 
