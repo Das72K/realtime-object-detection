@@ -62,7 +62,7 @@ def main() -> None:
 
         ok(f"onnxruntime {ort.__version__} providers={ort.get_available_providers()}")
     except ImportError:
-        warn("onnxruntime not installed (needed in Phase 3: pip install -e .[onnx])")
+        warn("onnxruntime not installed (needed for the ONNX backend and benchmark: pip install -e .[onnx])")
 
     if "--no-cam" not in sys.argv:
         print("== Webcam ==")

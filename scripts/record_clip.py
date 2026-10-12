@@ -3,8 +3,8 @@
     python scripts/record_clip.py                    # 20 s from webcam 0 -> data/videos/clip.mp4
     python scripts/record_clip.py --seconds 40 --out data/videos/room.mp4
 
-Walk in and out of frame a few times: that gives Phase 2 (tracking + line
-counting) something to count. Press q to stop early.
+Walk in and out of frame a few times: that gives the tracker and the line
+counter something to count. Press q to stop early.
 """
 
 from __future__ import annotations

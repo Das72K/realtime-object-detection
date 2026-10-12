@@ -1,7 +1,7 @@
 """Box geometry: IoU and a reference NMS implementation.
 
 These are written from scratch on purpose. Ultralytics does all of this
-internally, but the tracker (Phase 2) and the ONNX backend (Phase 3) need IoU
+internally, but the tracker and the raw ONNX backend need IoU and NMS
 directly, and implementing NMS once is the best way to understand it.
 """
 
@@ -72,7 +72,7 @@ def nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float = 0.45) -> l
 
 
 # --------------------------------------------------------------------------- #
-# 2-D primitives for line / zone counting (Phase 2)
+# 2-D primitives for line / zone counting
 # --------------------------------------------------------------------------- #
 Point = tuple[float, float]
 

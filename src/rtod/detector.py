@@ -1,6 +1,6 @@
 """YOLO detector backend (PyTorch via Ultralytics).
 
-Phase 3 adds an ONNX Runtime backend with the same `detect()` signature, so
+onnx_backend.OnnxDetector has the same `detect()` signature, so
 the rest of the pipeline never knows which one it is talking to.
 """
 

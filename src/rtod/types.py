@@ -20,7 +20,7 @@ class Detection:
     confidence: float
     class_id: int
     class_name: str
-    track_id: int | None = None  # filled in by the tracker (Phase 2)
+    track_id: int | None = None  # filled in by the tracker
 
     @property
     def xyxy(self) -> tuple[float, float, float, float]:

@@ -145,7 +145,7 @@ def run(args: argparse.Namespace) -> int:
     if not args.no_save:
         out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ---- Phase 2 state ------------------------------------------------------
+    # ---- tracking / counting state ------------------------------------------------------
     line_specs = [parse_line_spec(s, i) for i, s in enumerate(getattr(args, "line", []))]
     zone_specs = [parse_zone_spec(s, i) for i, s in enumerate(getattr(args, "zone", []))]
     lines: list[LineCounter] = []
